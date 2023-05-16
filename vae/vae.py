@@ -1,7 +1,7 @@
 import torch
 from torch.nn import functional
 from torch import nn
-from utils import trace
+from .utils import trace
 
 class VAE(nn.Module):
     def __init__(self, args):

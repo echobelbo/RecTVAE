@@ -35,7 +35,10 @@ def csr2test(test):
     return {str(r): {str(test.indices[ind]): int(1)
                      for ind in range(test.indptr[r], test.indptr[r + 1])}
             for r in range(test.shape[0]) if test.indptr[r] != test.indptr[r + 1]}
-
+# def csr2test(test):
+#     return {str(r): {str(test[r, ind]): int(1)
+#                      for ind in range(test.shape[1]) if test[r, ind] != 0}
+#             for r in range(test.shape[0])}
 
 def trace(A=None, B=None):
     if A is None:
