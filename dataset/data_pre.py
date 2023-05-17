@@ -3,7 +3,7 @@ import os
 from transformers import BertTokenizer, BertModel
 from scipy.sparse import coo_matrix, save_npz, load_npz
 import torch
-
+import json
 class DataProcesser():
     def __init__(self, data_path, dataset_name):
         self.data_path = data_path
@@ -87,27 +87,96 @@ class DataProcesser():
             feat.append(features)
             print('Batch {}/{} finished'.format(batch_idx + 1, num_batches))
         feat = np.concatenate(feat, axis=0)
-        # index_dict ={}
-        # for i , idx in enumerate(index):
-        #     if idx not in index_dict:
-        #         index_dict[idx] = feat[i]
-        #     else:
-        #         index_dict[idx] += feat[i]
-        # feat = np.array(list(index_dict.values()))
+        index_dict ={}
+        for i , idx in enumerate(index):
+            if idx not in index_dict:
+                index_dict[idx] = feat[i]
+            else:
+                index_dict[idx] += feat[i]
+        feat = np.array(list(index_dict.values()))
 
         if save:
             # feat = np.array(feat)
             np.save(os.path.join(self.data_path, 'data', self.dataset_name, 'text_feat.npy'), feat)
         return feat
+    def json_pre(self):
+        dir = os.path.join(self.data_path, 'data_raw')
+        json_dir = os.path.join(dir, self.dataset_name + '_5.json')
+        data = ""
+        with open(json_dir, 'r') as f:
+            data = f.read()
+            data = data.replace('}\n{', '},\n{')
+            data = '[' + data + ']'
+        with open(json_dir, 'w') as f:
+            f.write(data)
+
+    def json2txt(self):
+        dir = os.path.join(self.data_path, 'data_raw')
+        json_dir = os.path.join(dir, self.dataset_name + '_5.json')
+        target_dir = os.path.join(dir, self.dataset_name)
+        if not os.path.exists(target_dir):
+            os.mkdir(target_dir)
+
+        with open(json_dir) as f:
+            data = f.read()
+            data = json.loads(data)
+            new_data = [item for item in data if (  item.get("overall") != None and 
+                                                    item.get("reviewerID") != None and 
+                                                    item.get("asin") != None and 
+                                                    item.get("reviewText") != None and 
+                                                    item.get("verified") != None and 
+                                                    item.get("overall") > 3.5 and 
+                                                    item.get("verified") == True)]
+            user_id = [item["reviewerID"] for item in new_data]
+            item_id = [item["asin"] for item in new_data]
+            text = [item["reviewText"] for item in new_data]
             
 
+            user2index = np.unique(user_id)
+            item2index = np.unique(item_id)
+            user2index = np.column_stack((user2index, np.arange(len(user2index))))
+            item2index = np.column_stack((item2index, np.arange(len(item2index))))
+            text = np.column_stack((item_id, text))
+
+            user2index_dict = dict(zip(user2index[:, 0], user2index[:, 1]))
+            item2index_dict = dict(zip(item2index[:, 0], item2index[:, 1]))
+
+            user_id = [user2index_dict[user] for user in user_id]
+            item_id = [item2index_dict[item] for item in item_id]
+            text[:, 0] = [item2index_dict[item] for item in text[:, 0]]
+            text = np.unique(text, axis = 0)
+            sorted_index = np.argsort(text[:, 0].astype(int))
+            text = text[sorted_index]
+        
+            inter = np.column_stack((user_id, item_id))
+            inter = np.unique(inter, axis = 0)
+            sorted_index = np.argsort(inter[:, 0].astype(int))
+            inter = inter[sorted_index]
+            
+
+            np.savetxt(target_dir + '/inter.txt', inter, fmt='%s', delimiter='\t', comments='')
+            np.savetxt(target_dir + '/text.txt', text, fmt='%s', delimiter='\t', comments='')
+
+
+
+    def new_text2feat():
+        pass  
+
+
+
+
+
+
+        
 
 if __name__ == '__main__':
     data_path = '/root/autodl-tmp/yankai/RecTVAE'
-    dataset_name = 'CDs'
-    task = 'text'
+    dataset_name = 'All_Beauty'
+    # task = 'text'
     data_processer = DataProcesser(data_path, dataset_name)
-    dataset = data_processer.inter_dataset('train')
-    dataset = data_processer.inter_dataset('valid')
-    dataset = data_processer.inter_dataset('test')
+    # data_processer.json_pre()
+    data_processer.json2txt()
+    # dataset = data_processer.inter_dataset('train')
+    # dataset = data_processer.inter_dataset('valid')
+    # dataset = data_processer.inter_dataset('test')
     # text2feat = data_processer.text2feat(model_name='bert-base-uncased', batch_size=32, load=False, save=True)

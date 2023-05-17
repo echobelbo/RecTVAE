@@ -8,11 +8,17 @@ from torch.utils.data import DataLoader
 from scipy.sparse import coo_matrix, load_npz
 from tqdm import tqdm
 from torch import optim
-from sklearn.model_selection import train_test_split
+# from sklearn.model_selection import train_test_split
 import os
 import datetime
+# from functools import lru_cache
+import logging
+from joblib import Memory
+# @lru_cache(maxsize=None)
+# def load_npz_cached(path):
+#     return load_npz(path)
 
-
+cache = Memory('./cache', verbose=0)
 
 
 def Guassian_loss(recon_x, x):
@@ -44,30 +50,102 @@ def train(epoch):
         recon_batch, mu, logvar = model(data)
         loss = loss_function(recon_batch, data) + regularization(mu, logvar) * args.beta
         loss.backward()
+        max_norm = 1.0
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         loss_value += loss.item()
         optimizer.step()
 
 
-    print('====> Epoch: {} Average loss: {:.4f}'.format(epoch, loss_value / len(train_loader.dataset)))
+    logger.info('====> Epoch: {} Average loss: {:.4f}'.format(epoch, loss_value / len(train_loader.dataset)))
 
 
 def evaluate(split='valid'):
     y_true = eval(split + '_data')
     # Ttensor = eval(split + '_tensor')
     model.eval()
-    y_score, _, _ = model(train_tensor)
-    y_score.detach_()
-    y_score = y_score.squeeze(0)
-    y_score[train_data.row, train_data.col] = 0
-    _, rec_items = torch.topk(y_score, args.N, dim=1)
+    # y_score, _, _ = model(train_tensor)
+    # y_score.detach_()
+    # y_score = y_score.squeeze(0)
+    # y_score[train_data.row, train_data.col] = 0
+    # _, rec_items = torch.topk(y_score, args.N, dim=1)
     # y_pred = torch.gather(Ttensor, 1, rec_items).cpu().numpy()
-    run = sort2query(rec_items[:, 0:args.N])
-    test = csr2test(y_true.tocsr())
-    evaluator = Evaluator({'recall', 'map_cut'})
-    evaluator.evaluate(run, test)
-    result = evaluator.show(
-        ['recall_5', 'recall_10', 'recall_15', 'recall_20', 'map_cut_5', 'map_cut_10', 'map_cut_15', 'map_cut_20'])
-    print(result)
+    result = {
+        'recall_5': 0,
+        'recall_10': 0,
+        'recall_15': 0,
+        'recall_20': 0,
+        'map_cut_5': 0,
+        'map_cut_10': 0,
+        'map_cut_15': 0,
+        'map_cut_20': 0
+    }
+    cnt = 0
+    for start_idx in range(0, train_data.shape[0], args.batch):
+        cnt += 1
+        end_idx = min(start_idx + args.batch, train_data.shape[0])
+        batch_data = train_data.tocsr()[start_idx:end_idx].toarray().astype('float32')
+        nonzero_indices = np.nonzero(np.abs(batch_data) > 1e-12)
+
+        
+        train_tensor = torch.from_numpy(batch_data).to(args.device)
+
+        y_score, _, _ = model(train_tensor)
+        y_score.detach_()
+        y_score = y_score.squeeze(0)
+        y_score[nonzero_indices] = 0
+        # y_score[train_data.row[:end_idx-start_idx], np.unique(train_data.col)] = 0
+        _, rec_items = torch.topk(y_score, args.N, dim=1)
+    
+        run = sort2query(rec_items[:, 0:args.N])
+        test = csr2test(y_true.tocsr()[start_idx:end_idx])
+        evaluator = Evaluator({'recall', 'map_cut'})
+        evaluator.evaluate(run, test)
+        result_t = evaluator.show(
+            ['recall_5', 'recall_10', 'recall_15', 'recall_20', 'map_cut_5', 'map_cut_10', 'map_cut_15', 'map_cut_20'])
+        result['recall_5'] += result_t['recall_5']
+        result['recall_10'] += result_t['recall_10']
+        result['recall_15'] += result_t['recall_15']
+        result['recall_20'] += result_t['recall_20']
+        result['map_cut_5'] += result_t['map_cut_5']
+        result['map_cut_10'] += result_t['map_cut_10']
+        result['map_cut_15'] += result_t['map_cut_15']
+        result['map_cut_20'] += result_t['map_cut_20']
+    result['recall_5'] /= cnt
+    result['recall_10'] /= cnt
+    result['recall_15'] /= cnt
+    result['recall_20'] /= cnt
+    result['map_cut_5'] /= cnt
+    result['map_cut_10'] /= cnt
+    result['map_cut_15'] /= cnt
+    result['map_cut_20'] /= cnt
+    logger.info(result)
+# from torch.utils.data import DataLoader
+
+# def evaluate(split='valid', batch_size=64):
+#     y_true = eval(split + '_data')
+#     model.eval()
+#     y_score, _, _ = model(train_tensor)
+#     y_score.detach_()
+#     y_score = y_score.squeeze(0)
+#     y_score[train_data.row, train_data.col] = 0
+#     _, rec_items = torch.topk(y_score, args.N, dim=1)
+
+#     # Convert rec_items to a PyTorch DataLoader
+#     rec_items_data = torch.split(rec_items, batch_size)
+#     rec_items_loader = DataLoader(rec_items_data, batch_size=None)
+
+#     run = []
+#     for batch_rec_items in rec_items_loader:
+#         batch_run = sort2query(batch_rec_items[:, 0:args.N])
+#         run.extend(batch_run)
+
+    # test = csr2test(y_true.tocsr())
+    # evaluator = Evaluator({'recall', 'map_cut'})
+    # evaluator.evaluate(run, test)
+    # result = evaluator.show(
+    #     ['recall_5', 'recall_10', 'recall_15', 'recall_20', 'map_cut_5', 'map_cut_10', 'map_cut_15', 'map_cut_20'])
+    # logger.info(result)
+
 
 def input_inter(data_path):
     data = np.loadtxt(data_path, dtype=int)
@@ -82,16 +160,17 @@ def input_inter(data_path):
     return user_item
 
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser(description='Variational Auto Encoder')
-    parser.add_argument('--batch', type=int, default=64, help='input batch size for training (default: 100)')
-    parser.add_argument('-m', '--maxiter', type=int, default=10, help='number of epochs to train (default: 10)')
+    parser.add_argument('--batch', type=int, default=512, help='input batch size for training (default: 100)')
+    parser.add_argument('-m', '--maxiter', type=int, default=50, help='number of epochs to train (default: 10)')
     parser.add_argument('--gpu', action='store_true', default = True, help='enables CUDA training')
     parser.add_argument('--seed', type=int, default=2022, help='random seed (default: 1)')
     parser.add_argument('--log', type=int, default=1, metavar='N',
                         help='how many batches to wait before logging training status')
     # parser.add_argument('--dir', help='dataset directory', default='/Users/chenyifan/jianguo/dataset')
     # parser.add_argument('--data', help='specify dataset', default='test')
-    parser.add_argument('--layer', nargs='+', help='number of neurals in each layer', type=int, default=[100, 20])
+    parser.add_argument('--layer', nargs='+', help='number of neurals in each layer', type=int, default=[512, 256, 128])
     parser.add_argument('-N', help='number of recommended items', type=int, default=10)
     parser.add_argument('--lr', help='learning rate', type=float, default=1e-4)
     parser.add_argument('-a', '--alpha', help='parameter alpha', type=float, default=1)
@@ -110,39 +189,72 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     args.device = torch.device("cuda" if args.gpu and torch.cuda.is_available() else "cpu")
 
+#     gpu_memory_limit = 5 * 1024 * 1024  # 例如，限制为 10GB
+
+# # 设置 PyTorch 使用的 GPU
+#     torch.cuda.set_device(0)
+
+# # 设置 GPU 内存分配策略
+#     torch.cuda.set_limit(0, gpu_memory_limit)
     print('dataset directory: ' + args.data_path)
     directory = os.path.join(args.data_path)
+    logger = logging.getLogger("mylogger")
+    logger.setLevel(logging.DEBUG)
+
+    # 创建终端处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    logger.addHandler(console_handler)
+
+    log_dir = os.path.join(directory, 'log')
+    if not os.path.exists(log_dir):
+        os.mkdir(log_dir)
+    log_dir = os.path.join(log_dir, str(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))+'.txt')
+    file_handler = logging.FileHandler(log_dir)
+    file_handler.setLevel(logging.DEBUG)
+    logger.addHandler(file_handler)
+
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+
     data_processer = DataProcesser(args.data_path, args.data_name)
     if args.data_process:
-        print('data processing...')
+        logger.info('data processing...')
         data_processer.inter_dataset('train')
         data_processer.inter_dataset('valid')
         data_processer.inter_dataset('test')
         data_processer.inter_dataset('text')
-        print('data processing finished')
+        logger.info('data processing finished')
     
-    path = os.path.join(directory, 'data', args.data_name, 'train.npz')
-    print('train data path: ' + path)
-    train_data = load_npz(path)
-    train_tensor = torch.from_numpy(train_data.toarray().astype('float32')).to(args.device)
-    # train_data = input_inter(path)
-    # train_tensor = torch.from_numpy(train_data.astype('float32')).to(args.device)
-    # train_data = csr_matrix(train_data)
-    path = os.path.join(directory, 'data', args.data_name, 'valid.npz')
-    valid_data = load_npz(path)
-    # valid_data = csr_matrix(valid_data)
-    # valid_tensor = torch.from_numpy(valid_data.astype('float32')).to(args.device)
-    path = os.path.join(directory, 'data', args.data_name, 'test.npz')
-    test_data = load_npz(path)
+
+
+    @cache.cache
+    def load_data(directory):
+        path = os.path.join(directory, 'data', args.data_name, 'train.npz')
+        logger.info('train data path: ' + path)
+        train_data = load_npz(path)
+        # train_tensor = torch.from_numpy(train_data.toarray().astype('float32'))
+        # train_data = input_inter(path)
+        # train_tensor = torch.from_numpy(train_data.astype('float32')).to(args.device)
+        # train_data = csr_matrix(train_data)
+        path = os.path.join(directory, 'data', args.data_name, 'valid.npz')
+        valid_data = load_npz(path)
+        # valid_data = csr_matrix(valid_data)
+        # valid_tensor = torch.from_numpy(valid_data.astype('float32')).to(args.device)
+        path = os.path.join(directory, 'data', args.data_name, 'test.npz')
+        test_data = load_npz(path)
+        return train_data, valid_data, test_data
+    train_data, valid_data, test_data= load_data(directory)
     # test_data = input_inter(path)
     # test_data = csr_matrix(test_data)
     # test_tensor = torch.from_numpy(test_data.astype('float32')).to(args.device)
     
     if args.rating:
         
-
-        train_loader = DataLoader(train_tensor, args.batch, shuffle=True)
-        loss_function = BCE_loss
+        pass
+        # train_loader = DataLoader(train_tensor, args.batch, shuffle=True)
+        # loss_function = BCE_loss
     else:
         features = data_processer.text2feat(args.model_name, args.batch,args.feat_load, args.feat_save)
         features = torch.from_numpy(features.astype('float32')).to(args.device)
@@ -158,24 +270,24 @@ if __name__ == "__main__":
         path = os.path.join(directory, 'model', name)
         for l in args.layer:
             path += '_' + str(l)
-        print('load model from path: ' + path)
+        logger.info('load model from path: ' + path)
         model.load_state_dict(torch.load(path))
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     nowtime = datetime.datetime.now()
-    print('start training...' + str(nowtime))
+    logger.info('start training...' + str(nowtime))
 
     evaluate()
     nexttime = datetime.datetime.now()
-    print('first evaluation finished. Time=' + str(nexttime-nowtime))
+    logger.info('first evaluation finished. Time=' + str(nexttime-nowtime))
     for epoch in range(1, args.maxiter + 1):
         start = datetime.datetime.now()
-        print('epoch: ' + str(epoch) + ' start' + str(start))
+        logger.info('epoch: ' + str(epoch) + ' start' + str(start))
         train(epoch)
         evaluate()
-        evaluate('test')
-        print('epoch: ' + str(epoch) + ' finished, used' + str(start-datetime.datetime.now()))
-    print('training finished, used' + str(nowtime-datetime.datetime.now()))
+        evaluate(split='test')
+        logger.info('epoch: ' + str(epoch) + ' finished, used' + str(datetime.datetime.now()-start))
+    logger.info('training finished, used' + str(nowtime-datetime.datetime.now()))
     if args.save:
         name = 'cvae' if args.rating else 'fvae'
         path = os.path.join(directory, 'model', name)
@@ -185,3 +297,7 @@ if __name__ == "__main__":
             path += '_' + str(l)
         model.cpu()
         torch.save(model.state_dict(), path)
+    logger.removeHandler(console_handler)
+    logger.removeHandler(file_handler)
+    console_handler.close()
+    file_handler.close()

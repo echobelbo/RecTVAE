@@ -19,13 +19,13 @@ class VAE(nn.Module):
             self.gnet.append(nn.Linear(darray[self.l - i], darray[self.l - i - 1]))
 
     def encode(self, x):
-        h = x
+        h = x.to(self.device)
         for i in range(self.l - 1):
             h = functional.relu(self.inet[i](h))
         return self.mu(h), self.sigma(h)
 
     def decode(self, z):
-        h = z
+        h = z.to(self.device)
         for i in range(self.l - 1):
             h = functional.relu(self.gnet[i](h))
         return self.gnet[self.l - 1](h)
