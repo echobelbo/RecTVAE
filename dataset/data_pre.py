@@ -48,6 +48,8 @@ class DataProcesser():
                     np.savetxt(save_path + '/' + task + '.txt', text, fmt='%s', delimiter='\t')
     
     def text2feat(self, model_name, batch_size, load=True, save=True):
+        if torch.cuda.is_available():
+            device = "cuda"
         if load:
             feat_path = os.path.join(self.data_path, 'data', self.dataset_name, 'text_feat.npy')
             if os.path.exists(feat_path):
@@ -61,7 +63,7 @@ class DataProcesser():
         text = text[:, 1]
 
         tokenizer = BertTokenizer.from_pretrained(model_name)
-        model = BertModel.from_pretrained(model_name, mirror='ustc')
+        model = BertModel.from_pretrained(model_name, mirror='ustc').to(device)
 
         feat = []
         num_samples = len(text)
@@ -78,11 +80,12 @@ class DataProcesser():
                 truncation=True,
                 padding='longest',
                 return_tensors='pt'
-            )
+            ).to(device)
         
             with torch.no_grad():
                 outputs = model(**inputs)
-                features = outputs.last_hidden_state.sum(dim=1).squeeze().numpy()
+                features = outputs.last_hidden_state[:, 0, :].squeeze().cpu().numpy()
+                # features = features / np.linalg.norm(features, axis=1, keepdims=True)
 
             feat.append(features)
             print('Batch {}/{} finished'.format(batch_idx + 1, num_batches))
