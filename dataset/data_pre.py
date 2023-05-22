@@ -4,12 +4,18 @@ from transformers import BertTokenizer, BertModel
 from scipy.sparse import coo_matrix, save_npz, load_npz
 import torch
 import json
+def custom_parse_function(line):
+    columns = line.strip().split('\t')
+    if len(columns) == 3:
+        columns[1] = ' '.join(columns[1:])
+        del columns[2:]
+    return columns
 class DataProcesser():
     def __init__(self, data_path, dataset_name):
         self.data_path = data_path
         self.dataset_name = dataset_name
 
-    def inter_dataset(self, task):
+    def inter_dataset(self, task, user_nums, item_nums):
         if task != 'text':
             # data_path = self.data_path + '/' + 'data_raw'+ '/' + self.dataset_name + '/' + self.dataset_name + '.' + task + '.inter'
             data_path = os.path.join(self.data_path, 'data_raw', self.dataset_name, self.dataset_name + '.' + task + '.inter')
@@ -22,7 +28,7 @@ class DataProcesser():
                 print(item_ids.dtype)
                 print(user_ids.shape)
                 print(item_ids.shape)
-                sparse_matrix = coo_matrix((np.ones(len(dataset['item_idtoken'])), (user_ids, item_ids)))
+                sparse_matrix = coo_matrix((np.ones(len(dataset['item_idtoken'])), (user_ids, item_ids)), shape=(user_nums, item_nums))
                 save_path = os.path.join(self.data_path , 'data' , self.dataset_name)
                 if not os.path.exists(save_path) :
                     os.mkdir(save_path)
@@ -31,8 +37,10 @@ class DataProcesser():
         else:
             data_path = os.path.join(self.data_path, 'data_raw', self.dataset_name, self.dataset_name + '.text')
             map_path = os.path.join(self.data_path, 'data_raw', self.dataset_name, self.dataset_name + '.item2index')
+                
             with open(data_path) as data_file:
                 with open(map_path) as map_file:
+
                     text = np.genfromtxt(data_file, delimiter='\t', dtype=None, names=True)
                     item2index = np.genfromtxt(map_file, delimiter='\t', dtype=str)
                     # item_id = item2index[:, 0]
@@ -89,6 +97,7 @@ class DataProcesser():
 
             feat.append(features)
             print('Batch {}/{} finished'.format(batch_idx + 1, num_batches))
+            torch.cuda.empty_cache()
         feat = np.concatenate(feat, axis=0)
         index_dict ={}
         for i , idx in enumerate(index):
@@ -165,7 +174,8 @@ class DataProcesser():
     def new_text2feat():
         pass  
 
-
+    def data_mix(self):
+        dir = os.path.join(self.data_path, 'data')
 
 
 
@@ -174,12 +184,42 @@ class DataProcesser():
 
 if __name__ == '__main__':
     data_path = '/root/autodl-tmp/yankai/RecTVAE'
-    dataset_name = 'All_Beauty'
+    dataset_name = 'Food'
+    # task = 'text'
+    # data_processer = DataProcesser(data_path, dataset_name)
+    # # data_processer.json_pre()
+    # # data_processer.json2txt()
+    # dataset = data_processer.inter_dataset('train', 94010, 64439)
+    # dataset = data_processer.inter_dataset('valid', 94010, 64439)
+    # dataset = data_processer.inter_dataset('test', 94010, 64439)
+    # text2feat = data_processer.text2feat(model_name='bert-base-uncased', batch_size=32, load=False, save=True)
+    data_processer = DataProcesser(data_path, dataset_name)
+    # data_processer.json_pre()
+    # data_processer.json2txt()
+    # dataset = data_processer.inter_dataset('train', 115349, 39670)
+    # dataset = data_processer.inter_dataset('valid', 115349, 39670)
+
+    # dataset = data_processer.inter_dataset('text', 115348, 39669)
+    print("food")
+    # text2feat = data_processer.text2feat(model_name='bert-large-uncased', batch_size=256, load=False, save=True)
+    dataset_name = 'Kindle'
+    # task = 'text'
+    
+    data_processer = DataProcesser(data_path, dataset_name)
+    # data_processer.json_pre()
+    # data_processer.json2txt()
+    # dataset = data_processer.inter_dataset('train', 138436, 98111)
+    # dataset = data_processer.inter_dataset('valid', 138436, 98111)
+    dataset = data_processer.inter_dataset('text', 115348, 39669)
+    text2feat = data_processer.text2feat(model_name='bert-large-uncased', batch_size=128, load=False, save=True)
+    print("kindle")
+    dataset_name = 'Movies'
     # task = 'text'
     data_processer = DataProcesser(data_path, dataset_name)
     # data_processer.json_pre()
-    data_processer.json2txt()
-    # dataset = data_processer.inter_dataset('train')
-    # dataset = data_processer.inter_dataset('valid')
-    # dataset = data_processer.inter_dataset('test')
-    # text2feat = data_processer.text2feat(model_name='bert-base-uncased', batch_size=32, load=False, save=True)
+    # data_processer.json2txt()
+    dataset = data_processer.inter_dataset('train', 281700, 59203)
+    dataset = data_processer.inter_dataset('valid', 281700, 59203)
+    dataset = data_processer.inter_dataset('text', 115348, 39669)
+    text2feat = data_processer.text2feat(model_name='bert-large-uncased', batch_size=128, load=False, save=True)
+    print("movies")
